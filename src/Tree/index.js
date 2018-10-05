@@ -1,6 +1,8 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { layout, select, behavior, event } from 'd3';
+import {
+  layout, select, behavior, event,
+} from 'd3';
 import clone from 'clone';
 import deepEqual from 'deep-equal';
 import uuid from 'uuid';
@@ -22,6 +24,7 @@ export default class Tree extends React.Component {
       initialRender: true,
       targetNode: null,
       isTransitioning: false,
+      isRerendered: false,
       d3: {
         scale: this.props.zoom,
         translate: this.props.translate,
@@ -61,11 +64,57 @@ export default class Tree extends React.Component {
     }
   }
 
+  flatTreeStructure(node, map, childrenKey) {
+    map[node.name] = node;
+    if (node[childrenKey] && node[childrenKey].length) {
+      node[childrenKey].forEach(child => {
+        this.flatTreeStructure(child, map, childrenKey);
+      });
+    }
+    return map;
+  }
+
   componentWillReceiveProps(nextProps) {
     // Clone new data & assign internal properties
-    if (this.props.data !== nextProps.data) {
+    const newPropsData = clone(nextProps.data);
+
+    if (this.props.data !== nextProps.data && nextProps.externalCollapse) {
+
+      const currentState = clone(this.state.data);
+
+      const oldStateNodes = this.flatTreeStructure(currentState[0], {}, '_children');
+      const newPropsNodes = this.flatTreeStructure(newPropsData[0], {}, 'children');
+
+      // TODO: THIS IS SOOO BAADD, maybe diff on IDs ?
+      if (oldStateNodes.length !== newPropsNodes.length) {
+        this.internalState.isRerendered = true;
+        this.setState({
+          data: this.assignInternalProperties(newPropsData),
+        }, () => {
+          this.internalState.isRerendered = false;
+        });
+
+        return;
+      }
+
+      Object.keys(oldStateNodes).forEach(nodeKey => {
+        const node = oldStateNodes[nodeKey];
+        if (newPropsNodes[node.name]) {
+          node[nextProps.externalCollapse] = newPropsNodes[node.name][nextProps.externalCollapse];
+          node.attributes = { ...newPropsNodes[node.name].attributes };
+          if (nextProps.externalActive) {
+            node[nextProps.externalActive] = newPropsNodes[node.name][nextProps.externalActive];
+          }
+        }
+      });
+
       this.setState({
-        data: this.assignInternalProperties(clone(nextProps.data)),
+        data: currentState,
+      });
+    }
+    else if (this.props.data !== nextProps.data) {
+      this.setState({
+        data: this.assignInternalProperties(newPropsData),
       });
     }
 
@@ -73,9 +122,9 @@ export default class Tree extends React.Component {
 
     // If zoom-specific props change -> rebind listener with new values
     if (
-      !deepEqual(this.props.translate, nextProps.translate) ||
-      !deepEqual(this.props.scaleExtent, nextProps.scaleExtent) ||
-      this.props.zoom !== nextProps.zoom
+      !deepEqual(this.props.translate, nextProps.translate)
+      || !deepEqual(this.props.scaleExtent, nextProps.scaleExtent)
+      || this.props.zoom !== nextProps.zoom
     ) {
       this.bindZoomListener(nextProps);
     }
@@ -103,7 +152,9 @@ export default class Tree extends React.Component {
    * @return {void}
    */
   bindZoomListener(props) {
-    const { zoomable, scaleExtent, translate, zoom, onUpdate } = props;
+    const {
+      zoomable, scaleExtent, translate, zoom, onUpdate,
+    } = props;
     const { rd3tSvgClassName, rd3tGClassName } = this.state;
     const svg = select(`.${rd3tSvgClassName}`);
     const g = select(`.${rd3tGClassName}`);
@@ -213,11 +264,24 @@ export default class Tree extends React.Component {
    */
   collapseNode(node) {
     node._collapsed = true;
+    this.unmarkNodeActive(node);
     if (node._children && node._children.length > 0) {
       node._children.forEach(child => {
         this.collapseNode(child);
       });
     }
+  }
+
+  /**
+   * unmarkNodeActive - Sets the `_active` property of
+   * the passed `node` object to `false`.
+   *
+   * @param {object} node Node object with custom properties
+   *
+   * @return {void}
+   */
+  unmarkNodeActive(node) {
+    node._active = false;
   }
 
   /**
@@ -230,6 +294,26 @@ export default class Tree extends React.Component {
    */
   expandNode(node) {
     node._collapsed = false;
+  }
+
+  /**
+   * markNodeActive - Sets the `_active` property of
+   * the passed `node` object to `true`.
+   *
+   * @param {type} node Node object with custom properties
+   *
+   * @return {void}
+   */
+  markNodeActive(node) {
+    node._active = true;
+  }
+
+  getNodeCollapsedState(node) {
+    if (this.props.externalCollapse) {
+      return node[this.props.externalCollapse];
+    }
+
+    return node._collapsed;
   }
 
   /**
@@ -265,7 +349,12 @@ export default class Tree extends React.Component {
 
     if (this.props.collapsible && !this.state.isTransitioning) {
       if (targetNode._collapsed) {
-        this.expandNode(targetNode);
+        if (this.props.shouldAutoExpandChildren) {
+          this.autoExpand(targetNode);
+        }
+        else {
+          this.expandNode(targetNode);
+        }
         this.props.shouldCollapseNeighborNodes && this.collapseNeighborNodes(targetNode, data);
       } else {
         this.collapseNode(targetNode);
@@ -281,6 +370,34 @@ export default class Tree extends React.Component {
     } else {
       this.handleOnClickCb(targetNode, evt);
     }
+  }
+
+  autoExpand(node) {
+    const startingNode = node;
+
+    if (!startingNode._children || (startingNode._children && startingNode._children.length === 0)) {
+      return node;
+    }
+
+    // Expand the Root Node first
+    this.expandNode(startingNode);
+    this.markNodeActive(startingNode);
+
+    let selectedChild = this.props.shouldAutoExpandChildren(startingNode);
+    this.markNodeActive(selectedChild);
+
+    while(selectedChild) {
+      if (selectedChild._children && selectedChild._children.length) {
+        this.expandNode(selectedChild);
+        selectedChild = this.props.shouldAutoExpandChildren(selectedChild);
+        this.markNodeActive(selectedChild);
+      }
+      else {
+        selectedChild = undefined;
+      }
+    }
+
+    return node;
   }
 
   /**
@@ -332,6 +449,51 @@ export default class Tree extends React.Component {
   }
 
   /**
+   * restrictNodeHeightGrowth - Restricts height of the node siblings as they
+   * grow so that they look more streamlined. Catered just for horizontal orientation right now.
+   *
+   */
+
+  restrictNodeHeightGrowth(nodes, nodeSize) {
+    nodes.forEach(node => {
+      node.childrenCount = node.children ? node.children.length : 0;
+      if (node.depth === 0) {
+        return;
+      }
+
+      const childIndex = node.parent.children.findIndex(elem => elem.id === node.id);
+
+      if (node.parent.childrenCount === 1 && node.depth === 1) {
+        node.x = nodeSize.y / (-2);
+      }
+      else if (node.parent.childrenCount === 1) {
+        node.x = node.parent.x;
+      }
+      else if (node.parent.childrenCount === 2) {
+        node.x = childIndex * nodeSize.y - nodeSize.y / 2;
+        if (node.parent.x === nodeSize.y * -1.5) {
+          node.x -= nodeSize.y;
+        }
+        else if (node.parent.x === nodeSize.y * 1.5) {
+          node.x += nodeSize.y;
+        }
+      }
+      else if (node.parent.childrenCount === 3) {
+        node.x = childIndex * nodeSize.y - nodeSize.y * 1.5;
+        if (node.parent.x === nodeSize.y / 2) {
+          node.x += nodeSize.y;
+        }
+        else if (node.parent.x === nodeSize.y * 1.5) {
+          node.x += nodeSize.y;
+        }
+      }
+      else if (node.parent.childrenCount === 4) {
+        node.x = childIndex * nodeSize.y - 1.5 * nodeSize.y;
+      }
+    });
+  }
+
+  /**
    * generateTree - Generates tree elements (`nodes` and `links`) by
    * grabbing the rootNode from `this.state.data[0]`.
    * Restricts tree depth to `props.initialDepth` if defined and if this is
@@ -340,29 +502,37 @@ export default class Tree extends React.Component {
    * @return {object} Object containing `nodes` and `links`.
    */
   generateTree() {
-    const { initialDepth, depthFactor, separation, nodeSize, orientation } = this.props;
-
+    const {
+      initialDepth, depthFactor, separation, nodeSize, orientation, boundHeight,
+    } = this.props;
     const tree = layout
       .tree()
       .nodeSize(orientation === 'horizontal' ? [nodeSize.y, nodeSize.x] : [nodeSize.x, nodeSize.y])
       .separation(
         (a, b) => (a.parent.id === b.parent.id ? separation.siblings : separation.nonSiblings),
       )
-      .children(d => (d._collapsed ? null : d._children));
+      .children(d => (this.getNodeCollapsedState(d) ? null : d._children));
 
     const rootNode = this.state.data[0];
     let nodes = tree.nodes(rootNode);
 
     // set `initialDepth` on first render if specified
-    if (initialDepth !== undefined && this.internalState.initialRender) {
+    if (initialDepth !== undefined && (this.internalState.initialRender || this.internalState.isRerendered)) {
       this.setInitialTreeDepth(nodes, initialDepth);
       nodes = tree.nodes(rootNode);
+      if (this.props.shouldAutoExpandChildren) {
+        this.autoExpand(nodes[0]);
+      }
     }
 
     if (depthFactor) {
       nodes.forEach(node => {
         node.y = node.depth * depthFactor;
       });
+    }
+
+    if (boundHeight && orientation === 'horizontal') {
+      this.restrictNodeHeightGrowth(nodes, nodeSize);
     }
 
     const links = tree.links(nodes);
@@ -416,7 +586,9 @@ export default class Tree extends React.Component {
     } = this.props;
     const { translate, scale } = this.internalState.d3;
 
-    const subscriptions = { ...nodeSize, ...separation, depthFactor, initialDepth };
+    const subscriptions = {
+      ...nodeSize, ...separation, depthFactor, initialDepth,
+    };
 
     return (
       <div className={`rd3t-tree-container ${zoomable ? 'rd3t-grabbable' : undefined}`}>
@@ -478,12 +650,16 @@ Tree.defaultProps = {
   onMouseOver: undefined,
   onMouseOut: undefined,
   onUpdate: undefined,
+  shouldAutoExpandChildren: undefined,
   orientation: 'horizontal',
   translate: { x: 0, y: 0 },
   pathFunc: 'diagonal',
+  boundHeight: false,
   transitionDuration: 500,
   depthFactor: undefined,
   collapsible: true,
+  externalCollapse: undefined,
+  externalActive: undefined,
   initialDepth: undefined,
   zoomable: true,
   zoom: 1,
@@ -513,6 +689,7 @@ Tree.propTypes = {
   onMouseOver: PropTypes.func,
   onMouseOut: PropTypes.func,
   onUpdate: PropTypes.func,
+  shouldAutoExpandChildren: PropTypes.func,
   orientation: PropTypes.oneOf(['horizontal', 'vertical']),
   translate: PropTypes.shape({
     x: PropTypes.number,
@@ -522,9 +699,12 @@ Tree.propTypes = {
     PropTypes.oneOf(['diagonal', 'elbow', 'straight']),
     PropTypes.func,
   ]),
+  boundHeight: PropTypes.bool,
   transitionDuration: PropTypes.number,
   depthFactor: PropTypes.number,
   collapsible: PropTypes.bool,
+  externalCollapse: PropTypes.string,
+  externalActive: PropTypes.string,
   initialDepth: PropTypes.number,
   zoomable: PropTypes.bool,
   zoom: PropTypes.number,
