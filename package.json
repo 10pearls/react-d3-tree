@@ -1,6 +1,6 @@
 {
   "name": "@10pearls/react-d3-tree",
-  "version": "1.12.0",
+  "version": "1.12.1",
   "description": "React component to create interactive D3 tree hierarchies",
   "main": "lib/react-d3-tree.min.js",
   "scripts": {
@@ -110,7 +110,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/bkrem/react-d3-tree.git"
+    "url": "https://github.com/10pearls/react-d3-tree.git"
   },
   "keywords": [
     "react",
