@@ -29,7 +29,7 @@ export default class Node extends React.Component {
     const { nodeData: { x, y }, orientation, transitionDuration } = this.props;
     const transform = this.setTransformOrientation(x, y, orientation);
 
-    this.applyTransform(transform, transitionDuration);
+    this.applyTransform(transform, transitionDuration, this.props.styles.opacity);
   }
 
   componentWillUpdate(nextProps) {
@@ -38,7 +38,7 @@ export default class Node extends React.Component {
       nextProps.nodeData.y,
       nextProps.orientation,
     );
-    this.applyTransform(transform, nextProps.transitionDuration);
+    this.applyTransform(transform, nextProps.transitionDuration, nextProps.styles.opacity);
   }
 
   shouldComponentUpdate(nextProps) {
