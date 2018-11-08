@@ -82,8 +82,12 @@ export default class Tree extends React.Component {
       const oldStateNodes = this.flatTreeStructure(currentState[0], {}, '_children');
       const newPropsNodes = this.flatTreeStructure(newPropsData[0], {}, 'children');
 
+      const oldStateNodeKeys = Object.keys(oldStateNodes);
+      const newPropsNodesKeys = Object.keys(newPropsNodes);
+
       // TODO: THIS IS SOOO BAADD, maybe diff on IDs ?
-      if (oldStateNodes.length !== newPropsNodes.length) {
+
+      if (oldStateNodeKeys.length !== newPropsNodesKeys.length) {
         this.internalState.isRerendered = true;
         this.setState(
           {
@@ -97,7 +101,7 @@ export default class Tree extends React.Component {
         return;
       }
 
-      Object.keys(oldStateNodes).forEach(nodeKey => {
+      oldStateNodeKeys.forEach(nodeKey => {
         const node = oldStateNodes[nodeKey];
         if (newPropsNodes[node.name]) {
           node[nextProps.externalCollapse] = newPropsNodes[node.name][nextProps.externalCollapse];
