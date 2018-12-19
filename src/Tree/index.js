@@ -85,9 +85,11 @@ export default class Tree extends React.Component {
       const oldStateNodeKeys = Object.keys(oldStateNodes);
       const newPropsNodesKeys = Object.keys(newPropsNodes);
 
-      // TODO: THIS IS SOOO BAADD, maybe diff on IDs ?
-
-      if (oldStateNodeKeys.length !== newPropsNodesKeys.length) {
+      // If length changes or IDs differ in case of same length, rerender the tree
+      if (
+        oldStateNodeKeys.length !== newPropsNodesKeys.length ||
+        oldStateNodeKeys.toString() !== newPropsNodesKeys.toString()
+      ) {
         this.internalState.isRerendered = true;
         this.setState(
           {
